@@ -1,0 +1,140 @@
+﻿using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Threading.Tasks;
+using teste;
+
+class Program
+{
+    static void Main(string[] args)
+    {
+        try
+        {
+            Program program = new Program();
+
+            DAL dal = new DAL();
+            DataTable DT = dal.retornaDataTable("select l.ID,lt.COD_PL_TCE from licitacao_tce lt, licitacao l where l.COD_PL_TCE=lt.COD_PL_TCE and l.IDMUNICIPIO=lt.IDMUNICIPIO and lt.IDMUNICIPIO=64 and idlog=194721");
+            int i = 0;
+            foreach (DataRow linha in DT.Rows)
+            {
+                //i += program.RetornaDocumentosLicitacao(linha["COD_PL_TCE"].ToString(), linha["ID"].ToString());
+                // i += program.RetornaParticipanteLicitacao(linha["COD_PL_TCE"].ToString(), linha["ID"].ToString());
+                i++;
+            }
+            Console.Write("Processo percorridos: " + i.ToString());
+            Console.ReadKey();
+        }
+        catch (WebException e)
+        {
+            throw new Exception($"Erro ao fazer a requisição HTTP: {e.Message}");
+        }
+    }
+
+    public int RetornaDocumentosLicitacao(string id_pl_tce, string idlicitacao)
+    {
+        string apiUrl = "https://sistemas.tce.pe.gov.br/DadosAbertos/LicitacoesDocumentos!json?ProcessoLicitatorio=" + id_pl_tce;
+
+        try
+        {
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(apiUrl);
+            request.Method = "GET";
+
+            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+            using (Stream dataStream = response.GetResponseStream())
+            using (StreamReader reader = new StreamReader(dataStream, Encoding.UTF8))
+            {
+                string responseBody = reader.ReadToEnd();
+                // Deserializar o JSON para o modelo RespostaLicitacoes
+                var resposta = JsonConvert.DeserializeObject<RespostaLicitacoes>(responseBody);
+
+                // A partir daqui, você pode acessar os documentos dentro de resposta.Conteudo e fazer o que precisar com eles
+                DAL dal = new DAL();
+                string sSql = "";
+                int i = 0;
+                foreach (var documento in resposta.Resposta.Conteudo)
+                {
+                    sSql = "insert into licitacao_anexo (proc_id, caminho, titulo, ativo, temp, cod_arq_tce) " +
+                         "values (" + idlicitacao + ",'" + documento.LinkArquivo + "','" + documento.TipoArquivo + "','S','Api TCE Cod.PL" + documento.ProcessoLicitatorio + "'," + documento.Codigo + ")";
+                    dal.executaQuery(sSql);
+                    i++;
+                    sSql = "";
+                }
+                return i;
+            }
+        }
+        catch (WebException e)
+        {
+            throw new Exception($"Erro ao fazer a requisição HTTP: {e.Message}");
+        }
+    }
+
+    public int RetornaParticipanteLicitacao(string id_pl_tce, string idlicitacao)
+    {
+        try
+        {
+            DAL dal = new DAL();
+            DataTable DT = dal.retornaDataTable("select ADJUDICADA, NUMERODOCUMENTOAJUSTADO, RAZAOSOCIAL,TOTALADJUDICADOLICITANTE from licitacao_tce_participantes where COD_PL_TCE=" + id_pl_tce + " AND IDMUNICIPIO=64 AND NUMERODOCUMENTOAJUSTADO<>'0'");
+            int i = 0;string sSql;
+            foreach (DataRow linha in DT.Rows)
+            {
+                sSql = "insert into licitacao_participante (PROC_ID, DOCUMENTO, NOME, RESULTADO, VALOR, COD_PL_TCE) " +
+                          "values (" + idlicitacao + ",'" + linha["NUMERODOCUMENTOAJUSTADO"].ToString() + "','" + linha["RAZAOSOCIAL"].ToString() + "','" + linha["ADJUDICADA"].ToString() + "','" + linha["TOTALADJUDICADOLICITANTE"].ToString() + "'," + id_pl_tce + ")";
+                dal.executaQuery(sSql);
+                i++;
+                sSql = "";
+            }
+            return i;
+        }
+        catch (WebException e)
+        {
+            throw new Exception($"Erro ao fazer a requisição HTTP: {e.Message}");
+        }
+    }
+
+    public class DocumentoLicitacao
+    {
+        [JsonProperty("TipoArquivo")]
+        public string TipoArquivo { get; set; }
+
+        [JsonProperty("LinkArquivo")]
+        public string LinkArquivo { get; set; }
+
+        [JsonProperty("Codigo")]
+        public string Codigo { get; set; }
+
+        [JsonProperty("Data")]
+        public DateTime Data { get; set; }
+
+        [JsonProperty("ProcessoLicitatorio")]
+        public string ProcessoLicitatorio { get; set; }
+    }
+
+    public class RespostaLicitacoes
+    {
+        [JsonProperty("resposta")]
+        public Resposta Resposta { get; set; }
+    }
+
+    public class Resposta
+    {
+        [JsonProperty("status")]
+        public string Status { get; set; }
+
+        [JsonProperty("entidade")]
+        public string Entidade { get; set; }
+
+        [JsonProperty("tamanhoResultado")]
+        public int TamanhoResultado { get; set; }
+
+        [JsonProperty("limiteResultado")]
+        public int LimiteResultado { get; set; }
+
+        [JsonProperty("conteudo")]
+        public List<DocumentoLicitacao> Conteudo { get; set; }
+    }
+}
